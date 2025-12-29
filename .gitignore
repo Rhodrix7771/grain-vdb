@@ -1,0 +1,23 @@
+# Build artifacts
+dist/
+dist/*
+*.o
+*.a
+*.metallib
+*.air
+tests/stress_test_bin
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+build/
+egg-info/
+*.egg-info/
+
+# System
+.DS_Store
+.agent/
+.vscode/
+.internal/
