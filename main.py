@@ -58,6 +58,10 @@ def run_benchmark():
     # Results
     indices, scores, _ = engine.query(query_vec, k=K)
     print(f"Top 1 index: {indices[0]}, Score: {scores[0]:.4f}")
+    
+    # Audit
+    connectivity = engine.audit_consistency(indices)
+    print(f"Neighborhood Consistency (Gluing Energy): {connectivity:.4f}")
 
 if __name__ == "__main__":
     run_benchmark()

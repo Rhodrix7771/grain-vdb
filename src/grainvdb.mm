@@ -1,13 +1,20 @@
+/**
+ * @file grainvdb.mm
+ * @brief Native Metal-Accelerated Vector Engine
+ * Licensed under the MIT License.
+ */
+
 #include "gv_core.h"
 #import <Metal/Metal.h>
 #include <algorithm>
+#include <chrono>
 #include <iostream>
 #include <queue>
 #include <vector>
 
-// Internal nomenclature obfuscation
 typedef uint16_t gv_half_t;
 
+// Half-precision conversion utilities
 static gv_half_t f32_to_f16(float f) {
   uint32_t i = *((uint32_t *)&f);
   int s = (i >> 16) & 0x00008000;
@@ -19,10 +26,7 @@ static gv_half_t f32_to_f16(float f) {
     m = (m | 0x00800000) >> (1 - e);
     return s | (m >> 13);
   } else if (e == 0xff - (127 - 15)) {
-    if (m == 0)
-      return s | 0x7c00;
-    else
-      return s | 0x7c00 | (m >> 13);
+    return (m == 0) ? (s | 0x7c00) : (s | 0x7c00 | (m >> 13));
   } else {
     if (e > 30)
       return s | 0x7c00;
@@ -61,9 +65,7 @@ struct gv1_state_t {
   id<MTLLibrary> lib;
 };
 
-#include <chrono>
-
-gv1_state_t *gv1_ctx_create(uint32_t rank) {
+gv1_state_t *gv1_ctx_create(uint32_t rank, const char *library_path) {
   gv1_state_t *state = new gv1_state_t();
   state->dev = MTLCreateSystemDefaultDevice();
   if (!state->dev)
@@ -74,26 +76,15 @@ gv1_state_t *gv1_ctx_create(uint32_t rank) {
   state->m_buf = nil;
 
   NSError *err = nil;
-  // Attempt to find metallib in several common locations
-  NSArray *paths = @[
-    @"gv_kernel.metallib", @"grainvdb/gv_kernel.metallib",
-    @"dist/gv_kernel.metallib",
-    @"/Users/adamsussman/Desktop/grain-vdb/dist/gv_kernel.metallib"
-  ];
-
-  for (NSString *p in paths) {
-    state->lib = [state->dev newLibraryWithFile:p error:&err];
-    if (state->lib)
-      break;
-  }
+  NSString *p = [NSString stringWithUTF8String:library_path];
+  state->lib = [state->dev newLibraryWithFile:p error:&err];
 
   if (!state->lib) {
-    std::cerr << "GrainVDB Error: Could not load gv_kernel.metallib"
+    std::cerr << "GrainVDB: Error loading Metal library from: " << library_path
               << std::endl;
     return nullptr;
   }
 
-  // Internal kernel name obfuscated
   id<MTLFunction> fn = [state->lib newFunctionWithName:@"gv_k_m1_h"];
   state->p_state = [state->dev newComputePipelineStateWithFunction:fn
                                                              error:&err];
@@ -130,9 +121,11 @@ float gv1_manifold_fold(gv1_state_t *state, const float *probe, uint32_t top,
   id<MTLBuffer> r_buf =
       [state->dev newBufferWithLength:state->e_cnt * sizeof(float)
                               options:MTLResourceStorageModeShared];
+
+  auto t_start = std::chrono::high_resolution_clock::now();
+
   id<MTLCommandBuffer> c_buf = [state->q commandBuffer];
   id<MTLComputeCommandEncoder> enc = [c_buf computeCommandEncoder];
-
   [enc setComputePipelineState:state->p_state];
   [enc setBuffer:p_buf offset:0 atIndex:0];
   [enc setBuffer:state->m_buf offset:0 atIndex:1];
@@ -146,10 +139,8 @@ float gv1_manifold_fold(gv1_state_t *state, const float *probe, uint32_t top,
   [enc dispatchThreads:g_sz threadsPerThreadgroup:MTLSizeMake(tg_sz, 1, 1)];
   [enc endEncoding];
 
-  auto t1 = std::chrono::high_resolution_clock::now();
   [c_buf commit];
   [c_buf waitUntilCompleted];
-  auto t2 = std::chrono::high_resolution_clock::now();
 
   float *mags = (float *)[r_buf contents];
   typedef std::pair<float, uint64_t> ScIx;
@@ -164,41 +155,42 @@ float gv1_manifold_fold(gv1_state_t *state, const float *probe, uint32_t top,
     }
   }
 
-  for (int i = top - 1; i >= 0; i--) {
+  for (int i = (int)top - 1; i >= 0; i--) {
     result_mag[i] = pq.top().first;
     result_map[i] = pq.top().second;
     pq.pop();
   }
 
-  return std::chrono::duration<double, std::milli>(t2 - t1).count();
+  auto t_end = std::chrono::high_resolution_clock::now();
+  return (float)(std::chrono::duration_cast<std::chrono::microseconds>(t_end -
+                                                                       t_start)
+                     .count()) /
+         1000.0f;
 }
 
 float gv1_topology_audit(gv1_state_t *state, const uint64_t *map,
                          uint32_t count) {
   if (count < 2 || !state->m_buf)
     return 1.0f;
-
   gv_half_t *m_ptr = (gv_half_t *)[state->m_buf contents];
-  float total_gluing = 0.0f;
-  int pairs = 0;
-
+  std::vector<float> neighbors(count * state->rnk);
+  for (uint32_t i = 0; i < count; i++) {
+    uint64_t src = map[i] * state->rnk;
+    for (uint32_t k = 0; k < state->rnk; k++)
+      neighbors[i * state->rnk + k] = f16_to_f32(m_ptr[src + k]);
+  }
+  float connectivity = 0.0f;
+  int connections = 0;
   for (uint32_t i = 0; i < count; i++) {
     for (uint32_t j = i + 1; j < count; j++) {
-      uint64_t idx_a = map[i] * state->rnk;
-      uint64_t idx_b = map[j] * state->rnk;
-
       float dot = 0.0f;
-      for (uint32_t k = 0; k < state->rnk; k++) {
-        float va = f16_to_f32(m_ptr[idx_a + k]);
-        float vb = f16_to_f32(m_ptr[idx_b + k]);
-        dot += va * vb;
-      }
-      total_gluing += dot;
-      pairs++;
+      for (uint32_t k = 0; k < state->rnk; k++)
+        dot += neighbors[i * state->rnk + k] * neighbors[j * state->rnk + k];
+      if (dot > 0.85f)
+        connections++;
     }
   }
-
-  return pairs > 0 ? (total_gluing / pairs) : 1.0f;
+  return (float)connections / (count * (count - 1) / 2.0f);
 }
 
 void gv1_ctx_destroy(gv1_state_t *state) {

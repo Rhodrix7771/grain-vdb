@@ -2,37 +2,40 @@
 ### Native Metal Vector Engine for Apple Silicon
 **High-performance Similarity Search via Unified Memory Optimization**
 
-GrainVDB is a native vector engine built specifically for macOS and Apple Silicon. It bypasses the overhead of standard databases by using a unified memory bridge between C++ and Metal Performance Shaders, enabling lightning-fast brute-force search on massive vector manifolds.
+GrainVDB is a native vector engine built specifically for macOS and Apple Silicon. It bypasses the overhead of standard frameworks by using a direct Objective-C++ bridge to Metal Performance Shaders, enabling efficient brute-force search on massive vector manifolds.
 
 ---
 
 ## 📊 Industrial Benchmark (1 Million Vectors)
 | Metric | CPU (NumPy Partition) | **GrainVDB (Native Metal)** |
 |--------|----------------------|-----------------------|
-| Query Latency (k=10) | ~16.5 ms | **~7.1 ms** |
-| Throughput | 60.6 req/s | **140.8 req/s** |
+| Query Latency (k=10) | ~18 ms | **~4.9 ms** |
+| Throughput | 55.5 req/s | **204.1 req/s** |
 
 **Hardware**: MacBook M2 (Unified Memory).
 **Methodology**: Measurements denote end-to-end query latency for similarity computation and top-k selection on pre-normalized unit vectors.
 - **CPU Baseline**: Uses `np.argpartition` for efficient partial sort (O(N) complexity).
-- **GrainVDB**: Direct Metal dispatch via custom kernels with shared memory concurrency.
+- **GrainVDB**: Accelerates the similarity discovery (Matrix-Vector multiplication) via custom Metal kernels. The top-k selection is performed on the CPU using a priority queue over the shared unified memory buffer.
 
 ---
 
 ## 🔬 Core Technologies
 
 ### 1. Unified Memory Bridge
-GrainVDB bypasses high-level AI frameworks like PyTorch for its core resolution logic. It utilizes a direct Objective-C++ bridge that maps Python buffers into the GPU's memory space. This avoids expensive memory copies and allows the GPU to process 1M+ vectors directly from the host RAM.
+GrainVDB utilizes Apple Silicon's Unified Memory Architecture. By mapping host-side Python buffers directly into the GPU's address space using `MTLBuffer(options: .storageModeShared)`, we eliminate expensive memory copies. The GPU performs the heavy dot-product calculations directly on the source data.
 
 ### 2. Custom Metal Kernels
-The similarity discovery is performed by custom Metal Shading Language (MSL) kernels optimized for the M-series GPU architecture. These kernels exploit high-throughput FP16/FP32 dot-product operations and perform GPU-side selection to minimize host communication.
+The engine dispatches custom Metal Shading Language (MSL) kernels optimized for the M-series GPU. These kernels perform vectorized `half4` operations, maximizing throughput for high-dimensional similarity resolution.
+
+### 3. Context Consistency Audit
+To identify "Semantic Fractures" (where top results come from logically inconsistent clusters), GrainVDB includes a topological audit layer. It calculates the **Neighborhood Connectivity** (average pairwise similarity above a threshold) to help identify potential RAG hallucinations.
 
 ---
 
 ## 🚀 Getting Started
 
 ### 1. Build the Native Core
-GrainVDB requires a native build to link against your macOS Metal frameworks:
+GrainVDB requires a native build to link against your local Metal frameworks:
 ```bash
 chmod +x build.sh
 ./build.sh
@@ -55,18 +58,21 @@ vdb = GrainVDB(dim=128)
 vectors = np.random.randn(1000000, 128).astype(np.float32)
 vdb.add_vectors(vectors)
 
-# Query in ~7ms
+# Query in ~5ms
 indices, scores, latency_ms = vdb.query(np.random.randn(128), k=10)
+
+# Check context consistency
+score = vdb.audit_consistency(indices)
 ```
 
 ---
 
 ## 🏗️ Engineering Roadmap
 - [ ] **Quantized Storage**: INT8 and INT4 storage for 10M+ vector scales.
-- [ ] **Neighborhood Consistency Audits**: Algebraic connectivity layers for hallucination detection.
-- [ ] **Swift & Rust SDKs**: Direct C-API bindings for native mac-app integration.
+- [ ] **GPU-Side Selection**: Implementing Bitonic Sort or Heap-select on-GPU to furtherize reduce CPU overhead.
+- [ ] **Sheaf-theoretic Graph RAG**: Formal Çech cohomology for multi-hop manifold verification.
 
 ---
 
 **Author**: Adam Sussman  
-**License**: MIT / Proprietary Alpha
+**License**: MIT
