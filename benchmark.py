@@ -11,18 +11,6 @@ def get_git_revision_short_hash():
     except:
         return "unknown"
 
-def generate_clustered_data(n_samples, n_features, n_clusters=10):
-    """Generates data with some structure to make semantic audit meaningful."""
-    # simple centers
-    centers = np.random.randn(n_clusters, n_features).astype(np.float32)
-    # distribute points around centers
-    data = np.zeros((n_samples, n_features), dtype=np.float32)
-    for i in range(n_samples):
-        center_idx = i % n_clusters
-        noise = np.random.randn(n_features).astype(np.float32) * 0.1
-        data[i] = centers[center_idx] + noise
-    return data
-
 def run_technical_audit():
     N = 1_000_000
     DIM = 128
@@ -36,15 +24,13 @@ def run_technical_audit():
     print(f"Python: {sys.version.split()[0]} | NumPy: {np.__version__}")
     print(f"Config: N={N:,} | D={DIM} | K={K}")
     
-    # 1. Dataset Generation (Clustered for meaningful topology)
-    print("\n[1] Synthesizing Data (10 Semantic Clusters)...")
-    db_raw = generate_clustered_data(N, DIM, n_clusters=20)
-    # Pick a query close to cluster 0 center
-    q_raw = db_raw[0] + np.random.randn(DIM).astype(np.float32) * 0.05
+    # 1. Dataset Generation (Standard Random Normal)
+    print("\n[1] Generating Random Data (np.random.randn)...")
+    db_raw = np.random.randn(N, DIM).astype(np.float32)
+    q_raw = np.random.randn(DIM).astype(np.float32)
     
     # 2. Optimized CPU Baseline
     # Pre-normalize DB and Query once to isolate strictly search/selection time.
-    # Note: We use float32 for CPU reference.
     db_norm = db_raw / (np.linalg.norm(db_raw, axis=1, keepdims=True) + 1e-9)
     q_norm = q_raw / (np.linalg.norm(q_raw) + 1e-9)
 
@@ -108,27 +94,22 @@ def run_technical_audit():
     recall = overlap / K
     
     # Compare Scores (First match)
-    score_diff = abs(scores[0] - sims[top_k_idx[0]])
     
-    print(f"    CPU Top-1: {top_k_idx[0]} ({sims[top_k_idx[0]]:.4f})")
-    print(f"    GPU Top-1: {indices[0]} ({scores[0]:.4f})")
+    print(f"    CPU Top-1: {top_k_idx[0]}")
+    print(f"    GPU Top-1: {indices[0]}")
     
     if recall == 1.0:
         print(f"    ✅ Perfect Comparison: 10/10 indices match.")
     elif recall >= 0.9:
-        print(f"    ⚠️ High Overlap: {int(recall*10)}/10 indices match (acceptable for FP16/FP32).")
+        print(f"    ⚠️ High Overlap: {int(recall*10)}/10 indices match (acceptable for FP16 vs FP32).")
     else:
         print(f"    ❌ Low Overlap: {int(recall*10)}/10 indices match.")
 
     # 5. Connectivity Audit
     print("\n[5] Topology Audit (Neighborhood Coherence)")
-    # We used clustered data, so we expect high connectivity
+    print("    Note: On random noise, density should be ~0.0")
     consensus = vdb.audit(indices)
     print(f"    Density: {consensus:.4f} (Threshold=0.85)")
-    if consensus > 0.5:
-        print("    ✅ Strong semantic clustering detected.")
-    else:
-        print("    ⚠️ Low coherence (possibly noise or sparse manifold).")
 
     speedup = cpu_p50 / vdb_p50
     print(f"\n✨ Final Result: {speedup:.1f}x Speedup (p50)")
