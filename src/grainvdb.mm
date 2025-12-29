@@ -76,7 +76,8 @@ gv1_state_t *gv1_ctx_create(uint32_t rank) {
   NSError *err = nil;
   // Attempt to find metallib in several common locations
   NSArray *paths = @[
-    @"gv_kernel.metallib", @"dist/gv_kernel.metallib",
+    @"gv_kernel.metallib", @"grainvdb/gv_kernel.metallib",
+    @"dist/gv_kernel.metallib",
     @"/Users/adamsussman/Desktop/grain-vdb/dist/gv_kernel.metallib"
   ];
 

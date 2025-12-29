@@ -1,64 +1,72 @@
 # GrainVDB 🌾
-### Native Metal Manifold Engine for Apple Silicon
-**Hardware-Accelerated Similarity Search & Neighborhood Consistency Audits**
+### Native Metal Vector Engine for Apple Silicon
+**High-performance Similarity Search via Unified Memory Optimization**
 
-GrainVDB is an industrial-grade local engine for vector search, written in **Native Objective-C++ and Metal**. It is designed to exploit the **Unified Memory Architecture** of Apple Silicon for zero-copy similarity resolution and high-throughput manifold processing.
+GrainVDB is a native vector engine built specifically for macOS and Apple Silicon. It bypasses the overhead of standard databases by using a unified memory bridge between C++ and Metal Performance Shaders, enabling lightning-fast brute-force search on massive vector manifolds.
 
 ---
 
-## 📊 Benchmarks (1 Million x 128D Vectors)
+## 📊 Industrial Benchmark (1 Million Vectors)
 | Metric | CPU (NumPy Partition) | **GrainVDB (Native Metal)** |
 |--------|----------------------|-----------------------|
-| Query Latency (k=10) | ~21 ms | **~3.3 ms** |
-| Throughput | 47.6 req/s | **301.2 req/s** |
+| Query Latency (k=10) | ~16.5 ms | **~7.1 ms** |
+| Throughput | 60.6 req/s | **140.8 req/s** |
 
 **Hardware**: MacBook M2 (Unified Memory).
-**Methodology**: Measurements denote the cost of similarity computation and top-k selection on pre-normalized unit vectors. 
+**Methodology**: Measurements denote end-to-end query latency for similarity computation and top-k selection on pre-normalized unit vectors.
 - **CPU Baseline**: Uses `np.argpartition` for efficient partial sort (O(N) complexity).
-- **GrainVDB**: Direct Metal dispatch with shared memory buffers and GPU-side priority queue selection.
+- **GrainVDB**: Direct Metal dispatch via custom kernels with shared memory concurrency.
 
 ---
 
 ## 🔬 Core Technologies
 
-### 1. Unified Memory Optimization
-Unlike traditional databases that move data over PCIe, GrainVDB maps its vector buffers directly into the GPU's address space. This "Native Bridge" eliminates serialization overhead and allows for sub-4ms resolution on million-vector manifolds.
+### 1. Unified Memory Bridge
+GrainVDB bypasses high-level AI frameworks like PyTorch for its core resolution logic. It utilizes a direct Objective-C++ bridge that maps Python buffers into the GPU's memory space. This avoids expensive memory copies and allows the GPU to process 1M+ vectors directly from the host RAM.
 
-### 2. Neighborhood Consistency Audit (.audit())
-Standard k-NN retrieval can lead to "semantic noise" where similar results are pulled from logically inconsistent contexts. GrainVDB implements a **Topological Consistency Audit**:
-- It constructs a local similarity matrix of the retrieved results.
-- It calculates the **Gluing Energy** (Algebraic Connectivity).
-- A low score signals a "Context Fracture," providing a data-driven filter for RAG halluncination mitigation.
+### 2. Custom Metal Kernels
+The similarity discovery is performed by custom Metal Shading Language (MSL) kernels optimized for the M-series GPU architecture. These kernels exploit high-throughput FP16/FP32 dot-product operations and perform GPU-side selection to minimize host communication.
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Getting Started
 
+### 1. Build the Native Core
+GrainVDB requires a native build to link against your macOS Metal frameworks:
+```bash
+chmod +x build.sh
+./build.sh
+```
+
+### 2. Run the Benchmark
+```bash
+python3 main.py
+```
+
+### 3. Basic Implementation
 ```python
-from grain_vdb import GrainVDB
+from grainvdb.engine import GrainVDB
 import numpy as np
 
-# Initialize Native Core
+# Initialize with 128-dimensional vectors
 vdb = GrainVDB(dim=128)
 
-# Ingest data (Normalized internally)
-vectors = np.random.randn(1000, 128)
+# Add 1 million vectors (Normalized internally)
+vectors = np.random.randn(1000000, 128).astype(np.float32)
 vdb.add_vectors(vectors)
 
-# Query with sub-4ms latency
-scores, indices, latency = vdb.query(np.random.randn(128), k=10)
-
-# Audit for context consistency
-connectivity = vdb.audit(indices)
+# Query in ~7ms
+indices, scores, latency_ms = vdb.query(np.random.randn(128), k=10)
 ```
 
 ---
 
-## 🏗️ Technical Roadmap
-- [ ] Quasicrystal Phase Coding: High-dimensional quantization for 16x compression.
-- [ ] Sheaf-theoretic Complex: Formal Çech cohomology for multi-hop RAG verification.
+## 🏗️ Engineering Roadmap
+- [ ] **Quantized Storage**: INT8 and INT4 storage for 10M+ vector scales.
+- [ ] **Neighborhood Consistency Audits**: Algebraic connectivity layers for hallucination detection.
+- [ ] **Swift & Rust SDKs**: Direct C-API bindings for native mac-app integration.
 
 ---
 
 **Author**: Adam Sussman  
-**License**: Proprietary / Early Access
+**License**: MIT / Proprietary Alpha
