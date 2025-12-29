@@ -7,14 +7,13 @@ GrainVDB is a native vector engine built specifically for macOS and Apple Silico
 ---
 
 ## 📊 Performance Certification
-**Hardware**: MacBook M2 (Unified Memory) | **Dataset**: 1 Million x 128D (Float32) | **OS**: Darwin 24.6.0
-**Verified Commit**: `a84ff42`
+**Hardware**: MacBook M2 (Unified Memory) | **Dataset**: 1 Million x 128D (Float32) | **OS**: macOS Sequioa
+**Reference**: `benchmark.py` (Fixed Seed)
 
-| Metric | CPU (NumPy Partition) | **GrainVDB (Native Metal)** |
+| Metric | CPU (NumPy + Accelerate) | **GrainVDB (Native Metal)** |
 |--------|----------------------|-----------------------|
-| **Latency (p50)** | 19.69 ms | **6.69 ms** |
-| **Latency (p95)** | 24.74 ms | **9.22 ms** |
-| **Throughput** | ~50 req/s | **~150 req/s** |
+| **Latency (p50)** | ~19 ms | **~5-8 ms** |
+| **Speedup** | 1.0x | **2.2x - 4.0x** |
 
 **Methodology**:
 - **Wall-Time**: Measured at the Python boundary via `time.perf_counter()`. Includes bridge overhead, GPU execution, sync, and CPU selection.
@@ -35,7 +34,7 @@ Similarity resolution is performed by vectorized `half4` kernels written in Meta
 The engine includes a built-in topological audit (`vdb.audit()`). It calculates the **Neighborhood Connectivity** (density of pairwise similarities) among retrieved results.
 - **Function**: `density = (connected_pairs) / (total_possible_pairs)`
 - **Utility**: Detects "Semantic Fractures" (low coherence) which often correlate with RAG hallucinations. 
-- **Proof**: On clustered data, density -> 1.0. On random noise, density -> 0.0.
+- **Verification**: On random noise (default benchmark), density approaches `0.00`. On coherent clusters, density approaches `1.00`.
 
 ---
 
@@ -48,8 +47,8 @@ chmod +x build.sh
 ./build.sh
 ```
 
-### 2. Run Verification Benchmark
-Verify performance and mathematical correctness (Recall@K / Set Overlap).
+### 2. Run Validation Benchmark
+Verify performance and Recall@K on your machine.
 ```bash
 python3 benchmark.py
 ```

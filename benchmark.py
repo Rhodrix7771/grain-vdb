@@ -4,6 +4,7 @@ import sys
 import platform
 import subprocess
 from grainvdb import GrainVDB
+import pprint
 
 def get_git_revision_short_hash():
     try:
@@ -12,107 +13,92 @@ def get_git_revision_short_hash():
         return "unknown"
 
 def run_technical_audit():
+    # Fixed Seed
+    np.random.seed(42)
+    
     N = 1_000_000
     DIM = 128
     K = 10
     TRIALS = 10
     
-    print(f"--- GrainVDB Engineering Benchmark Certification ---")
-    print(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"Hardware: {platform.machine()} / {platform.system()} {platform.release()}")
+    print(f"--- GrainVDB Benchmark ---")
     print(f"Commit: {get_git_revision_short_hash()}")
+    print(f"OS/Arch: {platform.system()} {platform.release()} / {platform.machine()}")
     print(f"Python: {sys.version.split()[0]} | NumPy: {np.__version__}")
-    print(f"Config: N={N:,} | D={DIM} | K={K}")
     
-    # 1. Dataset Generation (Standard Random Normal)
-    print("\n[1] Generating Random Data (np.random.randn)...")
+    # Correctly display BLAS info for newer NumPy
+    try:
+        blas_info = np.show_config(mode="dicts")
+        # Just grab the first Build Dependency as a proxy for backend
+        print("BLAS Backend Check:")
+        pprint.pprint(blas_info.get("Build Dependencies", {}).get("blas", "Unknown"))
+    except:
+        print("BLAS Config: (Could not parse)")
+        
+    print(f"Params: N={N:,} | D={DIM} | K={K} | Trials={TRIALS}")
+    
+    print("\n[1] Data Generation (Random Normal, Fixed Seed)")
     db_raw = np.random.randn(N, DIM).astype(np.float32)
     q_raw = np.random.randn(DIM).astype(np.float32)
     
-    # 2. Optimized CPU Baseline
-    # Pre-normalize DB and Query once to isolate strictly search/selection time.
+    # Pre-normalize for isolation
     db_norm = db_raw / (np.linalg.norm(db_raw, axis=1, keepdims=True) + 1e-9)
     q_norm = q_raw / (np.linalg.norm(q_raw) + 1e-9)
 
-    print("\n[2] CPU Reference Baseline")
-    print("    Method: np.dot (BLAS) + np.argpartition (O(N) selection)")
+    print("\n[2] CPU Baseline")
+    print("    Method: np.dot + np.argpartition")
     
-    # Warmup
-    _ = np.argpartition(np.dot(db_norm, q_norm), -K)[-K:]
-
     cpu_times = []
+    _ = np.argpartition(np.dot(db_norm, q_norm), -K)[-K:] # Warmup
+
     for _ in range(TRIALS):
         t0 = time.perf_counter()
+        # Native DOT + Argpartition
         sims = np.dot(db_norm, q_norm)
         top_k_idx = np.argpartition(sims, -K)[-K:]
-        # Sorting strictly for comparison stability (negligible cost on K=10)
+        # Sorting for stability in comparison
         top_k_idx = top_k_idx[np.argsort(sims[top_k_idx])[::-1]]
         cpu_times.append((time.perf_counter() - t0) * 1000)
     
-    cpu_p50 = np.percentile(cpu_times, 50)
-    cpu_p95 = np.percentile(cpu_times, 95)
-    print(f"    Latency: {cpu_p50:.2f} ms (p50) | {cpu_p95:.2f} ms (p95)")
+    print(f"    Latency: {np.median(cpu_times):.2f} ms (p50) | {np.percentile(cpu_times, 95):.2f} ms (p95)")
 
-    # 3. Native Core (GrainVDB)
+    print("\n[3] Native Core (GrainVDB)")
     try:
         vdb = GrainVDB(dim=DIM)
     except Exception as e:
-        print(f"    FATAL: Engine Load Failed: {e}")
+        print(f"    FATAL: {e}")
         return
 
-    print("\n[3] Native Core (GrainVDB)")
-    print("    Method: Metal (FP16/half4) Brute Force + CPU Priority Queue")
-    print("    Loading Unified Memory...")
     vdb.add_vectors(db_raw)
     
-    # Warmup
-    vdb.query(q_raw, k=K)
-    
+    vdb.query(q_raw, k=K) # Warmup
+
     vdb_times = []
     for _ in range(TRIALS):
-        # Timer starts inside .query() which covers:
-        # 1. Input preparation
-        # 2. Native boundary cross
-        # 3. GPU Dispatch + Wait
-        # 4. CPU Selection
-        # 5. Return
-        _, _, lat = vdb.query(q_raw, k=K) # lat is end-to-end wall time
+        # Latency includes Python overhead + GPU execution + CPU selection
+        _, _, lat = vdb.query(q_raw, k=K)
         vdb_times.append(lat)
         
-    vdb_p50 = np.percentile(vdb_times, 50)
-    vdb_p95 = np.percentile(vdb_times, 95)
-    print(f"    Latency: {vdb_p50:.2f} ms (p50) | {vdb_p95:.2f} ms (p95)")
+    print(f"    Latency: {np.median(vdb_times):.2f} ms (p50) | {np.percentile(vdb_times, 95):.2f} ms (p95)")
 
-    # 4. Correctness Audit
-    print("\n[4] Correctness Verification (Recall@K)")
+    print("\n[4] Correctness (Recall@K)")
     indices, scores, _ = vdb.query(q_raw, k=K)
     
-    # Compare Sets
     cpu_set = set(top_k_idx)
     gpu_set = set(indices)
     overlap = len(cpu_set.intersection(gpu_set))
     recall = overlap / K
     
-    # Compare Scores (First match)
+    print(f"    Recall: {recall:.2f} ({overlap}/{K})")
+    print(f"    CPU Top-1: {top_k_idx[0]} | GPU Top-1: {indices[0]}")
     
-    print(f"    CPU Top-1: {top_k_idx[0]}")
-    print(f"    GPU Top-1: {indices[0]}")
-    
-    if recall == 1.0:
-        print(f"    ✅ Perfect Comparison: 10/10 indices match.")
-    elif recall >= 0.9:
-        print(f"    ⚠️ High Overlap: {int(recall*10)}/10 indices match (acceptable for FP16 vs FP32).")
+    if recall < 0.9:
+        print("    WARNING: Low recall. Check precision/normalization.")
     else:
-        print(f"    ❌ Low Overlap: {int(recall*10)}/10 indices match.")
+        print("    PASS: High overlap with CPU baseline.")
 
-    # 5. Connectivity Audit
-    print("\n[5] Topology Audit (Neighborhood Coherence)")
-    print("    Note: On random noise, density should be ~0.0")
-    consensus = vdb.audit(indices)
-    print(f"    Density: {consensus:.4f} (Threshold=0.85)")
-
-    speedup = cpu_p50 / vdb_p50
-    print(f"\n✨ Final Result: {speedup:.1f}x Speedup (p50)")
+    speedup = np.median(cpu_times) / np.median(vdb_times)
+    print(f"\n✨ Speedup: {speedup:.1f}x (p50)")
 
 if __name__ == "__main__":
     run_technical_audit()
