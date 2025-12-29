@@ -5,34 +5,30 @@ from typing import Tuple
 
 class GrainVDB:
     """
-    Python Bridge to the GrainVDB Native Metal Core.
+    Python interface to the Native GrainVDB Metal Core.
     """
     def __init__(self, dim: int = 128):
         self.dim = dim
         self.lib = None
         self.ctx = None
-        self._load_library()
+        self._init_native()
         
-    def _load_library(self):
-        # Locate the dylib in the package root
-        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        lib_name = "libgrainvdb.dylib"
-        lib_path = os.path.join(base_path, lib_name)
+    def _init_native(self):
+        # Resolve dynamic library path
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        lib_path = os.path.join(root, "libgrainvdb.dylib")
         
         if not os.path.exists(lib_path):
-            raise FileNotFoundError(f"Native binary {lib_name} not found. Please run ./build.sh first.")
+            raise FileNotFoundError(f"Native core missing. Run ./build.sh first.")
             
         self.lib = ctypes.CDLL(lib_path)
         
-        # Define C-API signatures
-        # gv1_ctx_create(uint32_t rank, const char* library_path)
+        # C-API Definitions
         self.lib.gv1_ctx_create.restype = ctypes.c_void_p
         self.lib.gv1_ctx_create.argtypes = [ctypes.c_uint32, ctypes.c_char_p]
         
-        # gv1_data_feed(gv1_state_t* state, const float* buffer, uint32_t count)
         self.lib.gv1_data_feed.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_float), ctypes.c_uint32]
         
-        # gv1_manifold_fold(...) -> returns float (latency in ms)
         self.lib.gv1_manifold_fold.restype = ctypes.c_float
         self.lib.gv1_manifold_fold.argtypes = [
             ctypes.c_void_p, 
@@ -42,28 +38,26 @@ class GrainVDB:
             ctypes.POINTER(ctypes.c_float)
         ]
         
-        # gv1_topology_audit(...) -> returns float (connectivity)
         self.lib.gv1_topology_audit.restype = ctypes.c_float
         self.lib.gv1_topology_audit.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint64), ctypes.c_uint32]
         
-        # gv1_ctx_destroy
         self.lib.gv1_ctx_destroy.argtypes = [ctypes.c_void_p]
         
-        # Initialize context with metallib path
-        metallib_path = os.path.join(base_path, "grainvdb/gv_kernel.metallib")
-        self.ctx = self.lib.gv1_ctx_create(self.dim, metallib_path.encode('utf-8'))
+        # Load metallib relative to project root
+        metallib = os.path.join(root, "grainvdb/gv_kernel.metallib")
+        self.ctx = self.lib.gv1_ctx_create(self.dim, metallib.encode('utf-8'))
         
         if not self.ctx:
-            raise RuntimeError(f"Failed to initialize GrainVDB context using {metallib_path}")
+            raise RuntimeError("Backend initialization failed.")
 
     def add_vectors(self, vectors: np.ndarray):
         """
-        Loads vectors into Unified Memory. Normalizes internally for cosine similarity.
+        Loads vectors into GPU memory. Pre-normalization applied for cosine similarity.
         """
         if vectors.shape[1] != self.dim:
-            raise ValueError(f"Feature dimension mismatch. Expected {self.dim}, got {vectors.shape[1]}")
+            raise ValueError(f"Dim mismatch. Expected {self.dim}")
             
-        # Ensure vectors are float32 and normalized
+        # Normalization (Cosine Similarity Requirement)
         v_f32 = vectors.astype(np.float32)
         norms = np.linalg.norm(v_f32, axis=1, keepdims=True)
         v_norm = v_f32 / (norms + 1e-9)
@@ -74,8 +68,7 @@ class GrainVDB:
 
     def query(self, query_vec: np.ndarray, k: int = 10) -> Tuple[np.ndarray, np.ndarray, float]:
         """
-        Executes GPU similarity search + CPU top-k selection.
-        Returns (indices, scores, wall_time_ms).
+        Execute sub-ms similarity discovery using the native bridge.
         """
         # Normalize probe
         q_f32 = query_vec.astype(np.float32)
@@ -84,23 +77,23 @@ class GrainVDB:
         probe = np.ascontiguousarray(q_norm, dtype=np.float32)
         p_ptr = probe.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
         
-        results_idx = np.zeros(k, dtype=np.uint64)
-        results_scores = np.zeros(k, dtype=np.float32)
+        indices = np.zeros(k, dtype=np.uint64)
+        scores = np.zeros(k, dtype=np.float32)
         
-        idx_ptr = results_idx.ctypes.data_as(ctypes.POINTER(ctypes.c_uint64))
-        score_ptr = results_scores.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
+        idx_ptr = indices.ctypes.data_as(ctypes.POINTER(ctypes.c_uint64))
+        score_ptr = scores.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
         
-        # Measured wall-time in milliseconds inside the C++ function
-        latency_ms = self.lib.gv1_manifold_fold(self.ctx, p_ptr, k, idx_ptr, score_ptr)
+        # The returned value is the internal C++ performance metric (ms)
+        internal_ms = self.lib.gv1_manifold_fold(self.ctx, p_ptr, k, idx_ptr, score_ptr)
         
-        return results_idx, results_scores, latency_ms
+        return indices, scores, internal_ms
 
     def audit(self, indices: np.ndarray) -> float:
         """
-        Calculates neighborhood connectivity density.
+        Verify topological neighborhood consistency.
         """
-        idx_ptr = indices.astype(np.uint64).ctypes.data_as(ctypes.POINTER(ctypes.c_uint64))
-        return self.lib.gv1_topology_audit(self.ctx, idx_ptr, len(indices))
+        ptr = indices.astype(np.uint64).ctypes.data_as(ctypes.POINTER(ctypes.c_uint64))
+        return self.lib.gv1_topology_audit(self.ctx, ptr, len(indices))
 
     def __del__(self):
         if self.ctx and self.lib:

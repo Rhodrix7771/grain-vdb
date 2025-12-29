@@ -17,4 +17,4 @@ clang++ -dynamiclib -std=c++17 -O3 \
     -framework Metal -framework Foundation \
     src/grainvdb.mm -o libgrainvdb.dylib
 
-echo "✅ Build Complete. Ready to run 'python3 benchmark.py'"
+echo "✅ Build Complete. Run 'python3 benchmark.py' to verify."
